@@ -102,6 +102,7 @@ if "__main__" == __name__:
         action="store_true",
         help="Add datetime to the output folder name",
     )
+    parser.add_argument("--three_modality", action="store_true")
 
     args = parser.parse_args()
     resume_run = args.resume_run
@@ -141,8 +142,10 @@ if "__main__" == __name__:
             out_dir_run = os.path.join(output_dir, job_name)
         else:
             out_dir_run = os.path.join("./output", job_name)
-        os.makedirs(out_dir_run, exist_ok=False)
+        os.makedirs(out_dir_run, exist_ok=True)
 
+    if args.three_modality:
+        cfg.dataloader.max_train_batch_size = 1
     cfg_data = cfg.dataset
 
     # Other directories
@@ -260,6 +263,12 @@ if "__main__" == __name__:
         augmentation_args=cfg.augmentation,
         depth_transform=depth_transform,
     )
+    if args.three_modality:
+        from src.dataset import collate_fn_three_modality
+        collate_fn = collate_fn_three_modality
+    else:
+        collate_fn = None
+    
     logging.debug("Augmentation: ", cfg.augmentation)
     if "mixed" == cfg_data.train.name:
         dataset_ls = train_dataset
@@ -279,6 +288,7 @@ if "__main__" == __name__:
             concat_dataset,
             batch_sampler=mixed_sampler,
             num_workers=cfg.dataloader.num_workers,
+            collate_fn=collate_fn,
         )
     else:
         train_loader = DataLoader(
@@ -287,6 +297,7 @@ if "__main__" == __name__:
             num_workers=cfg.dataloader.num_workers,
             shuffle=True,
             generator=loader_generator,
+            collate_fn=collate_fn,
         )
     # Validation dataset
     val_loaders: List[DataLoader] = []
@@ -301,6 +312,7 @@ if "__main__" == __name__:
             batch_size=1,
             shuffle=False,
             num_workers=cfg.dataloader.num_workers,
+            collate_fn=collate_fn,
         )
         val_loaders.append(_val_loader)
 
@@ -317,6 +329,7 @@ if "__main__" == __name__:
             batch_size=1,
             shuffle=False,
             num_workers=cfg.dataloader.num_workers,
+            collate_fn=collate_fn,
         )
         vis_loaders.append(_vis_loader)
 
@@ -348,6 +361,7 @@ if "__main__" == __name__:
         accumulation_steps=accumulation_steps,
         val_dataloaders=val_loaders,
         vis_dataloaders=vis_loaders,
+        three_modality=args.three_modality,
     )
 
     # -------------------- Checkpoint --------------------

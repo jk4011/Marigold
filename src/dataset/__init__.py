@@ -21,6 +21,7 @@
 # --------------------------------------------------------------------------
 
 import os
+import torch
 
 from .base_depth_dataset import BaseDepthDataset, get_pred_name, DatasetMode  # noqa: F401
 from .diode_dataset import DIODEDataset
@@ -66,3 +67,20 @@ def get_dataset(
         raise NotImplementedError
 
     return dataset
+
+
+def collate_fn_three_modality(batch_raw):
+    assert len(batch_raw) == 1
+    batch = batch_raw[0]
+    
+    batch["rgb_norm"] = batch["rgb_norm"].repeat(3, 1, 1, 1)
+    batch["valid_mask_raw"] = batch["valid_mask_raw"].repeat(3, 1, 1, 1)
+
+    depth = batch["depth_raw_norm"]
+    depth_inverse = 1 / (batch["depth_raw_linear"] + 1)
+    depth_inverse = (depth_inverse - depth_inverse.min()) / (depth_inverse.max() - depth_inverse.min())
+    depth_inverse = depth_inverse * 2 - 1
+    depth_batch = torch.stack([depth, -depth, depth_inverse])
+    batch["depth_raw_norm"] = depth_batch
+    
+    return batch

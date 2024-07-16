@@ -66,6 +66,7 @@ class MarigoldTrainer:
         accumulation_steps: int,
         val_dataloaders: List[DataLoader] = None,
         vis_dataloaders: List[DataLoader] = None,
+        three_modality: bool = False,
     ):
         self.cfg: OmegaConf = cfg
         self.model: MarigoldPipeline = model
@@ -80,6 +81,9 @@ class MarigoldTrainer:
         self.val_loaders: List[DataLoader] = val_dataloaders
         self.vis_loaders: List[DataLoader] = vis_dataloaders
         self.accumulation_steps: int = accumulation_steps
+        self.three_modality = three_modality
+        if self.three_modality:
+            self.model.set_three_modality()
 
         # Adapt input layers
         if 8 != self.model.unet.config["in_channels"]:
@@ -244,14 +248,22 @@ class MarigoldTrainer:
                         depth_gt_for_latent
                     )  # [B, 4, h, w]
 
-                # Sample a random timestep for each image
-                timesteps = torch.randint(
-                    0,
-                    self.scheduler_timesteps,
-                    (batch_size,),
-                    device=device,
-                    generator=rand_num_generator,
-                ).long()  # [B]
+                if self.three_modality:
+                    timesteps = torch.randint(
+                        0,
+                        self.scheduler_timesteps,
+                        (1,),
+                        device=device,
+                        generator=rand_num_generator,
+                    ).long().repeat(batch_size)  # [B]
+                else:
+                    timesteps = torch.randint(
+                        0,
+                        self.scheduler_timesteps,
+                        (batch_size,),
+                        device=device,
+                        generator=rand_num_generator,
+                    ).long()  # [B]
 
                 # Sample noise
                 if self.apply_multi_res_noise:
@@ -289,10 +301,17 @@ class MarigoldTrainer:
                 )  # [B, 8, h, w]
                 cat_latents = cat_latents.float()
 
+                if self.three_modality:
+                    modality_embed = self.model.get_modality_embed(device)
+                else:
+                    modality_embed = None
+                    
                 # Predict the noise residual
+                from jhutil import color_log; color_log(1111, "cat_latents", cat_latents)
                 model_pred = self.model.unet(
-                    cat_latents, timesteps, text_embed
+                    cat_latents, timesteps, text_embed, class_labels=modality_embed
                 ).sample  # [B, 4, h, w]
+                from jhutil import color_log; color_log(2222, "model_pred ", model_pred)
                 if torch.isnan(model_pred).any():
                     logging.warning("model_pred contains NaN.")
 
