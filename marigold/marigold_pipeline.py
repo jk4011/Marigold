@@ -47,6 +47,8 @@ from .util.image_util import (
     get_tv_resample_method,
     resize_max_res,
 )
+from .util.three_modality import XFormersJointAttnProcessor
+
 
 
 class MarigoldDepthOutput(BaseOutput):
@@ -143,7 +145,8 @@ class MarigoldPipeline(DiffusionPipeline):
         self.default_processing_resolution = default_processing_resolution
 
         self.empty_text_embed = None
-
+        self.three_modality = False
+        
     @torch.no_grad()
     def __call__(
         self,
@@ -225,6 +228,9 @@ class MarigoldPipeline(DiffusionPipeline):
             rgb = rgb.unsqueeze(0)  # [1, rgb, H, W]
         elif isinstance(input_image, torch.Tensor):
             rgb = input_image
+            if len(rgb.shape) == 3:
+                rgb = rgb.unsqueeze(0)  # [1, rgb, H, W]
+                
         else:
             raise TypeError(f"Unknown input type: {type(input_image) = }")
         input_size = rgb.shape
@@ -365,7 +371,46 @@ class MarigoldPipeline(DiffusionPipeline):
         )
         text_input_ids = text_inputs.input_ids.to(self.text_encoder.device)
         self.empty_text_embed = self.text_encoder(text_input_ids)[0].to(self.dtype)
+    
+    
+    def set_joint_attention(self):
+        transformer_blocks = [
+            # down_blocks
+            self.unet.down_blocks[0].attentions[0].transformer_blocks[0],
+            self.unet.down_blocks[0].attentions[1].transformer_blocks[0],
+            self.unet.down_blocks[1].attentions[0].transformer_blocks[0],
+            self.unet.down_blocks[1].attentions[1].transformer_blocks[0],
+            self.unet.down_blocks[2].attentions[0].transformer_blocks[0],
+            self.unet.down_blocks[2].attentions[1].transformer_blocks[0],
+            # up_blocks
+            self.unet.up_blocks[1].attentions[0].transformer_blocks[0],
+            self.unet.up_blocks[1].attentions[1].transformer_blocks[0],
+            self.unet.up_blocks[1].attentions[2].transformer_blocks[0],
+            self.unet.up_blocks[2].attentions[0].transformer_blocks[0],
+            self.unet.up_blocks[2].attentions[1].transformer_blocks[0],
+            self.unet.up_blocks[2].attentions[2].transformer_blocks[0],
+            self.unet.up_blocks[3].attentions[0].transformer_blocks[0],
+            self.unet.up_blocks[3].attentions[1].transformer_blocks[0],
+            self.unet.up_blocks[3].attentions[2].transformer_blocks[0],
+            # mid_block
+            self.unet.mid_block.attentions[0].transformer_blocks[0],
+        ]
+        # self attention -> joint self attention
+        for transformer_block in transformer_blocks:
+            transformer_block.attn1.set_processor(XFormersJointAttnProcessor())
 
+    
+    def set_three_modality(self):
+        self.three_modality = True
+        self.set_joint_attention()
+        
+
+    def get_modality_embed(self, device):
+        geo_class = torch.tensor([[0, 0, 1], [0, 1, 0], [0, 0, 1]], device=device, dtype=self.dtype)
+        geo_embedding = torch.cat([torch.sin(geo_class), torch.cos(geo_class)], dim=-1)
+        
+        return geo_embedding
+    
     @torch.no_grad()
     def single_infer(
         self,
@@ -424,7 +469,12 @@ class MarigoldPipeline(DiffusionPipeline):
             )
         else:
             iterable = enumerate(timesteps)
-
+        
+        if self.three_modality:
+            modality_embed = self.get_modality_embed(device)
+        else:
+            modality_embed = None
+            
         for i, t in iterable:
             unet_input = torch.cat(
                 [rgb_latent, depth_latent], dim=1
@@ -432,7 +482,7 @@ class MarigoldPipeline(DiffusionPipeline):
 
             # predict the noise residual
             noise_pred = self.unet(
-                unet_input, t, encoder_hidden_states=batch_empty_text_embed
+                unet_input, t.repeat(3), encoder_hidden_states=batch_empty_text_embed, class_labels=modality_embed,
             ).sample  # [B, 4, h, w]
 
             # compute the previous noisy sample x_t -> x_t-1
