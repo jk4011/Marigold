@@ -562,6 +562,11 @@ class MarigoldTrainer:
             )
 
             depth_pred: np.ndarray = pipe_out.depth_np
+            
+            if self.three_modality:
+                depth_pred = depth_pred[0]
+                valid_mask = valid_mask[0]
+                valid_mask_ts = valid_mask_ts[0]
 
             if "least_square" == self.cfg.eval.alignment:
                 depth_pred, scale, shift = align_depth_least_square(

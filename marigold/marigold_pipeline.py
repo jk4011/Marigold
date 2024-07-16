@@ -435,6 +435,8 @@ class MarigoldPipeline(DiffusionPipeline):
             `torch.Tensor`: Predicted depth map.
         """
         device = self.device
+        if self.three_modality:
+            rgb_in = rgb_in.repeat(3, 1, 1, 1)
         rgb_in = rgb_in.to(device)
 
         # Set timesteps

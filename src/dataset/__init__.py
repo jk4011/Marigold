@@ -76,11 +76,12 @@ def collate_fn_three_modality(batch_raw):
     batch["rgb_norm"] = batch["rgb_norm"].repeat(3, 1, 1, 1)
     batch["valid_mask_raw"] = batch["valid_mask_raw"].repeat(3, 1, 1, 1)
 
-    depth = batch["depth_raw_norm"]
-    depth_inverse = 1 / (batch["depth_raw_linear"] + 1)
-    depth_inverse = (depth_inverse - depth_inverse.min()) / (depth_inverse.max() - depth_inverse.min())
-    depth_inverse = depth_inverse * 2 - 1
-    depth_batch = torch.stack([depth, -depth, depth_inverse])
-    batch["depth_raw_norm"] = depth_batch
+    if "depth_raw_norm" in batch:
+        depth = batch["depth_raw_norm"]
+        depth_inverse = 1 / (batch["depth_raw_linear"] + 1)
+        depth_inverse = (depth_inverse - depth_inverse.min()) / (depth_inverse.max() - depth_inverse.min())
+        depth_inverse = depth_inverse * 2 - 1
+        depth_batch = torch.stack([depth, -depth, depth_inverse])
+        batch["depth_raw_norm"] = depth_batch
     
     return batch

@@ -10,7 +10,8 @@ export BASE_CKPT_DIR=/data2/wlsgur4011/Marigold/checkpoint  # directory of pretr
 # command 1
 CUDA_VISIBLE_DEVICES=$GPU python train.py \
     --config config/train_marigold.yaml \
-    --no_wandb
+    --add_datetime_prefix \
+    # --no_wandb
     # --resume_run ./output/train_marigold/checkpoint/latest \
 
 # ... 
