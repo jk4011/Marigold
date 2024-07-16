@@ -50,6 +50,7 @@ from src.util.metric import MetricTracker
 from src.util.multi_res_noise import multi_res_noise_like
 from src.util.alignment import align_depth_least_square
 from src.util.seeding import generate_seed_sequence
+from torch.cuda.amp import GradScaler, autocast
 
 
 class MarigoldTrainer:
@@ -206,6 +207,8 @@ class MarigoldTrainer:
         self.train_metrics.reset()
         accumulated_step = 0
 
+        scaler = GradScaler()
+
         for epoch in range(self.epoch, self.max_epoch + 1):
             self.epoch = epoch
             logging.debug(f"epoch: {self.epoch}")
@@ -307,41 +310,41 @@ class MarigoldTrainer:
                     modality_embed = None
                     
                 # Predict the noise residual
-                from jhutil import color_log; color_log(1111, "cat_latents", cat_latents)
-                model_pred = self.model.unet(
-                    cat_latents, timesteps, text_embed, class_labels=modality_embed
-                ).sample  # [B, 4, h, w]
-                from jhutil import color_log; color_log(2222, "model_pred ", model_pred)
-                if torch.isnan(model_pred).any():
-                    logging.warning("model_pred contains NaN.")
+                with autocast():
+                    model_pred = self.model.unet(
+                        cat_latents, timesteps, text_embed, class_labels=modality_embed
+                    ).sample  # [B, 4, h, w]
+                    if torch.isnan(model_pred).any():
+                        logging.warning("model_pred contains NaN.")
 
-                # Get the target for loss depending on the prediction type
-                if "sample" == self.prediction_type:
-                    target = gt_depth_latent
-                elif "epsilon" == self.prediction_type:
-                    target = noise
-                elif "v_prediction" == self.prediction_type:
-                    target = self.training_noise_scheduler.get_velocity(
-                        gt_depth_latent, noise, timesteps
-                    )  # [B, 4, h, w]
-                else:
-                    raise ValueError(f"Unknown prediction type {self.prediction_type}")
+                    # Get the target for loss depending on the prediction type
+                    if "sample" == self.prediction_type:
+                        target = gt_depth_latent
+                    elif "epsilon" == self.prediction_type:
+                        target = noise
+                    elif "v_prediction" == self.prediction_type:
+                        target = self.training_noise_scheduler.get_velocity(
+                            gt_depth_latent, noise, timesteps
+                        )  # [B, 4, h, w]
+                    else:
+                        raise ValueError(f"Unknown prediction type {self.prediction_type}")
 
-                # Masked latent loss
-                if self.gt_mask_type is not None:
-                    latent_loss = self.loss(
-                        model_pred[valid_mask_down].float(),
-                        target[valid_mask_down].float(),
-                    )
-                else:
-                    latent_loss = self.loss(model_pred.float(), target.float())
+                    # Masked latent loss
+                    if self.gt_mask_type is not None:
+                        latent_loss = self.loss(
+                            model_pred[valid_mask_down].float(),
+                            target[valid_mask_down].float(),
+                        )
+                    else:
+                        latent_loss = self.loss(model_pred.float(), target.float())
 
-                loss = latent_loss.mean()
+                    loss = latent_loss.mean()
 
-                self.train_metrics.update("loss", loss.item())
+                    self.train_metrics.update("loss", loss.item())
 
-                loss = loss / self.gradient_accumulation_steps
-                loss.backward()
+                    loss = loss / self.gradient_accumulation_steps
+                
+                scaler.scale(loss).backward()
                 accumulated_step += 1
 
                 self.n_batch_in_epoch += 1
@@ -349,7 +352,8 @@ class MarigoldTrainer:
 
                 # Perform optimization step
                 if accumulated_step >= self.gradient_accumulation_steps:
-                    self.optimizer.step()
+                    scaler.step(self.optimizer)
+                    scaler.update()
                     self.lr_scheduler.step()
                     self.optimizer.zero_grad()
                     accumulated_step = 0
