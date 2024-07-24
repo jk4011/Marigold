@@ -406,7 +406,7 @@ class MarigoldPipeline(DiffusionPipeline):
         
 
     def get_modality_embed(self, device):
-        geo_class = torch.tensor([[0, 0, 1], [0, 1, 0], [0, 0, 1]], device=device, dtype=self.dtype)
+        geo_class = torch.tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]], device=device, dtype=self.dtype)
         geo_embedding = torch.cat([torch.sin(geo_class), torch.cos(geo_class)], dim=-1)
         
         return geo_embedding
@@ -474,17 +474,19 @@ class MarigoldPipeline(DiffusionPipeline):
         
         if self.three_modality:
             modality_embed = self.get_modality_embed(device)
+            n_repeat = 3
         else:
             modality_embed = None
+            n_repeat = 1
             
         for i, t in iterable:
             unet_input = torch.cat(
                 [rgb_latent, depth_latent], dim=1
             )  # this order is important
-
+                
             # predict the noise residual
             noise_pred = self.unet(
-                unet_input, t.repeat(3), encoder_hidden_states=batch_empty_text_embed, class_labels=modality_embed,
+                unet_input, t.repeat(n_repeat), encoder_hidden_states=batch_empty_text_embed, class_labels=modality_embed,
             ).sample  # [B, 4, h, w]
 
             # compute the previous noisy sample x_t -> x_t-1

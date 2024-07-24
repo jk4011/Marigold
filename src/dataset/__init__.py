@@ -83,5 +83,6 @@ def collate_fn_three_modality(batch_raw):
         depth_inverse = depth_inverse * 2 - 1
         depth_batch = torch.stack([depth, -depth, depth_inverse])
         batch["depth_raw_norm"] = depth_batch
+    batch["rgb_relative_path"] = [batch["rgb_relative_path"]]
     
     return batch

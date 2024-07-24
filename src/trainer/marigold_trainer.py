@@ -401,7 +401,7 @@ class MarigoldTrainer:
                         logging.info("Time is up, training paused.")
                         return
 
-                    torch.cuda.empty_cache()
+                    # torch.cuda.empty_cache()
                     # <<< Effective batch end <<<
 
             # Epoch end
@@ -604,6 +604,8 @@ class MarigoldTrainer:
                 img_name = batch["rgb_relative_path"][0].replace("/", "_")
                 png_save_path = os.path.join(save_to_dir, f"{img_name}.png")
                 depth_to_save = (pipe_out.depth_np * 65535.0).astype(np.uint16)
+                if self.three_modality:
+                    depth_to_save = depth_to_save[0]
                 Image.fromarray(depth_to_save).save(png_save_path, mode="I;16")
 
         return metric_tracker.result()
