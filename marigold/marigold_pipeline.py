@@ -48,7 +48,7 @@ from .util.image_util import (
     resize_max_res,
 )
 from .util.three_modality import XFormersJointAttnProcessor
-
+from diffusers.models.embeddings import TimestepEmbedding
 
 
 class MarigoldDepthOutput(BaseOutput):
@@ -125,6 +125,8 @@ class MarigoldPipeline(DiffusionPipeline):
         default_processing_resolution: Optional[int] = None,
     ):
         super().__init__()
+
+        from jhutil import color_log; color_log(0000, )
         self.register_modules(
             unet=unet,
             vae=vae,
@@ -146,7 +148,7 @@ class MarigoldPipeline(DiffusionPipeline):
 
         self.empty_text_embed = None
         self.three_modality = False
-        
+
     @torch.no_grad()
     def __call__(
         self,
@@ -230,7 +232,7 @@ class MarigoldPipeline(DiffusionPipeline):
             rgb = input_image
             if len(rgb.shape) == 3:
                 rgb = rgb.unsqueeze(0)  # [1, rgb, H, W]
-                
+
         else:
             raise TypeError(f"Unknown input type: {type(input_image) = }")
         input_size = rgb.shape
@@ -247,7 +249,7 @@ class MarigoldPipeline(DiffusionPipeline):
             )
 
         # Normalize rgb values
-        rgb_norm: torch.Tensor = rgb / 255.0 * 2.0 - 1.0  #  [0, 255] -> [-1, 1]
+        rgb_norm: torch.Tensor = rgb / 255.0 * 2.0 - 1.0  # [0, 255] -> [-1, 1]
         rgb_norm = rgb_norm.to(self.dtype)
         assert rgb_norm.min() >= -1.0 and rgb_norm.max() <= 1.0
 
@@ -371,8 +373,7 @@ class MarigoldPipeline(DiffusionPipeline):
         )
         text_input_ids = text_inputs.input_ids.to(self.text_encoder.device)
         self.empty_text_embed = self.text_encoder(text_input_ids)[0].to(self.dtype)
-    
-    
+
     def set_joint_attention(self):
         transformer_blocks = [
             # down_blocks
@@ -399,18 +400,19 @@ class MarigoldPipeline(DiffusionPipeline):
         for transformer_block in transformer_blocks:
             transformer_block.attn1.set_processor(XFormersJointAttnProcessor())
 
-    
     def set_three_modality(self):
         self.three_modality = True
         self.set_joint_attention()
         
+        if self.unet.class_embedding is None:
+            self.unet.class_embedding = TimestepEmbedding(6, 1280, act_fn="silu")
 
     def get_modality_embed(self, device):
         geo_class = torch.tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]], device=device, dtype=self.dtype)
         geo_embedding = torch.cat([torch.sin(geo_class), torch.cos(geo_class)], dim=-1)
-        
+
         return geo_embedding
-    
+
     @torch.no_grad()
     def single_infer(
         self,
@@ -471,19 +473,19 @@ class MarigoldPipeline(DiffusionPipeline):
             )
         else:
             iterable = enumerate(timesteps)
-        
+
         if self.three_modality:
             modality_embed = self.get_modality_embed(device)
             n_repeat = 3
         else:
             modality_embed = None
             n_repeat = 1
-            
+
         for i, t in iterable:
             unet_input = torch.cat(
                 [rgb_latent, depth_latent], dim=1
             )  # this order is important
-                
+
             # predict the noise residual
             noise_pred = self.unet(
                 unet_input, t.repeat(n_repeat), encoder_hidden_states=batch_empty_text_embed, class_labels=modality_embed,
